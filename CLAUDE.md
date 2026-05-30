@@ -47,6 +47,10 @@ cluster/
     helmchartconfig.yaml      Traefik dashboard config (mounted via --volume at create)
 
 k3d-config.yaml               Cluster definition (ports, image, node count)
+
+local/                        Gitignored user overrides (see local/README.md)
+  .env                        Makefile variable overrides (WORKERS, K3S_VERSION, etc.)
+  k3d-config.yaml             Merged on top of repo k3d-config.yaml at cluster create
 ```
 
 ## Adding an app repo
