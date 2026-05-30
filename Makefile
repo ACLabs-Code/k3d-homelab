@@ -18,7 +18,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
         kubeseal-cert \
-        check-docker check-kubectl check-k3d
+        check-docker check-kubectl check-k3d check-kubeseal
 
 ## Help
 
@@ -56,6 +56,11 @@ check-tools: check-docker check-kubectl check-k3d
 	@echo "  docker   : $$(docker --version)"
 	@kubectl version --client 2>/dev/null | sed 's/^/  kubectl  : /'
 	@echo "  k3d      : $$(k3d version | head -1)"
+	@if which kubeseal > /dev/null 2>&1; then \
+		echo "  kubeseal : $$(kubeseal --version 2>&1)"; \
+	else \
+		echo "  kubeseal : not installed (optional — needed for make kubeseal-cert)"; \
+	fi
 
 ## Cluster lifecycle
 
@@ -230,3 +235,6 @@ check-kubectl:
 
 check-k3d:
 	@which k3d > /dev/null 2>&1 || (echo "Error: k3d not found. Run: brew install k3d"; exit 1)
+
+check-kubeseal:
+	@which kubeseal > /dev/null 2>&1 || (echo "Error: kubeseal not found. Run: brew install kubeseal"; exit 1)
