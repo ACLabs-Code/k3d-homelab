@@ -101,8 +101,10 @@ info:
 	@echo "  Traefik Dashboard : http://traefik.localhost/dashboard/"
 	@echo "  ArgoCD UI         : http://argocd.localhost"
 	@echo ""
-	@echo "=== Credentials ==="
-	@echo "  ArgoCD admin password: make argocd-password"
+	@echo "=== ArgoCD Credentials ==="
+	@echo "  Username : admin"
+	@printf "  Password : "; kubectl get secret argocd-initial-admin-secret -n argocd \
+		-o jsonpath="{.data.password}" 2>/dev/null | base64 -d; echo ""
 
 ## ArgoCD
 
