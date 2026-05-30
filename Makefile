@@ -9,7 +9,7 @@ ARGOCD_PASSWORD ?= $(shell kubectl get secret argocd-initial-admin-secret -n arg
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-tools create delete recreate status info \
+.PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
         check-docker check-kubectl check-k3d
 
@@ -22,6 +22,8 @@ help:
 	@echo "  create [WORKERS=N]   Create cluster + bootstrap ArgoCD (max WORKERS=$(MAX_WORKERS))"
 	@echo "  delete               Destroy cluster"
 	@echo "  recreate [WORKERS=N] Delete and recreate cluster"
+	@echo "  scale WORKERS=N      Set total agent (worker) count"
+	@echo "  add-worker           Add one agent to running cluster"
 	@echo ""
 	@echo "Observability"
 	@echo "  status               Cluster, node, and pod health"
@@ -76,6 +78,31 @@ delete: check-k3d
 	k3d cluster delete $(CLUSTER_NAME)
 
 recreate: delete create
+
+scale: check-k3d check-kubectl
+	@if [ -z "$(WORKERS)" ]; then \
+		echo "Usage: make scale WORKERS=N"; exit 1; \
+	fi
+	@if [ "$(WORKERS)" -gt "$(MAX_WORKERS)" ]; then \
+		echo "Error: WORKERS=$(WORKERS) exceeds max $(MAX_WORKERS)"; exit 1; \
+	fi
+	@CURRENT=$$(kubectl get nodes --no-headers 2>/dev/null | grep -v "control-plane" | wc -l | tr -d ' '); \
+	TARGET=$(WORKERS); \
+	if [ "$$TARGET" -gt "$$CURRENT" ]; then \
+		ADD=$$((TARGET - CURRENT)); \
+		echo "Adding $$ADD agent(s) ($$CURRENT → $$TARGET)..."; \
+		for i in $$(seq $$CURRENT $$((TARGET - 1))); do \
+			k3d node create $(CLUSTER_NAME)-agent-$$i --cluster $(CLUSTER_NAME); \
+		done; \
+	elif [ "$$TARGET" -lt "$$CURRENT" ]; then \
+		echo "Error: scaling down not supported — use 'make recreate WORKERS=$(WORKERS)'"; exit 1; \
+	else \
+		echo "Already at $$CURRENT agent(s), nothing to do."; \
+	fi
+
+add-worker: check-k3d check-kubectl
+	@CURRENT=$$(kubectl get nodes --no-headers 2>/dev/null | grep -v "control-plane" | wc -l | tr -d ' '); \
+	$(MAKE) scale WORKERS=$$((CURRENT + 1))
 
 ## Observability
 
