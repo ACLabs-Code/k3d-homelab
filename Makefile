@@ -54,11 +54,7 @@ create: check-docker check-kubectl check-k3d
 	@if [ -z "$(REPO_URL)" ]; then \
 		echo "Error: could not detect repo URL from git remote"; exit 1; \
 	fi
-	k3d cluster create $(CLUSTER_NAME) \
-		--port "80:80@loadbalancer" \
-		--port "443:443@loadbalancer" \
-		--agents $(WORKERS) \
-		--image rancher/k3s:$(K3S_VERSION) \
+	k3d cluster create --config k3d-config.yaml --agents $(WORKERS) \
 		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0"
 	@echo "Waiting for Traefik..."
 	kubectl wait --for=condition=complete job/helm-install-traefik -n kube-system --timeout=120s
