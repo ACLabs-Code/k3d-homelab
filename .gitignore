@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local overrides
+*.local
+.env
+
+# Claude Code
+.claude/
