@@ -4,10 +4,10 @@ Bare-minimum bootstrap for a local Kubernetes lab. Spins up a K3D cluster with T
 
 ## Prerequisites
 
-Docker, kubectl, k3d:
+Docker, kubectl, k3d, kubeseal:
 
 ```bash
-brew install kubectl k3d
+brew install kubectl k3d kubeseal
 ```
 
 ## Quickstart
@@ -68,9 +68,11 @@ make argocd-list-apps
 ## All targets
 
 ```
-make create [WORKERS=N]                  Create cluster + bootstrap ArgoCD
+make create [WORKERS=N]                  Create cluster + bootstrap all components
 make delete                              Destroy cluster
 make recreate [WORKERS=N]                Delete and recreate
+make scale WORKERS=N                     Add agents to running cluster (scale up only)
+make add-worker                          Add one agent to running cluster
 make status                              Cluster, node, and ArgoCD app health
 make info                                Print access URLs and credentials
 make argocd-password                     Print ArgoCD admin credentials
@@ -78,6 +80,7 @@ make argocd-set-password NEW_PASSWORD=x  Set ArgoCD admin password
 make argocd-add-repo REPO=x [TOKEN=x]   Register an app repo
 make argocd-list-repos                   List registered repos
 make argocd-list-apps                    List apps and sync status
+make kubeseal-cert                       Fetch Sealed Secrets public cert
 make check-tools                         Verify required tools are installed
 ```
 
@@ -88,6 +91,7 @@ make check-tools                         Verify required tools are installed
 | K3S | v1.31.4-k3s1 |
 | Traefik | v2.x (bundled with K3S) |
 | ArgoCD | v2.12.7 |
+| Sealed Secrets | v0.37.0 |
 
 ## Planned
 
