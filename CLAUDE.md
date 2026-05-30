@@ -29,12 +29,12 @@ make ca-trust                # trust local CA in macOS Keychain (sudo)
 3. `k3d cluster create` — mounts Traefik HelmChartConfig + `./data:/mnt/data` into all nodes
 4. Wait for `helm-install-traefik` job + traefik rollout
 5. Patch `local-path-config` ConfigMap → storage root becomes `/mnt/data`; restart provisioner
-6. `kubectl apply bootstrap/sealed-secrets.yaml` — installs Sealed Secrets controller; wait rollout
-7. `kubectl apply bootstrap/cert-manager.yaml` — installs cert-manager; wait rollout + webhook pod ready
-8. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
-9. `kubectl apply bootstrap/cert-manager-issuers.yaml` — creates `localhost-ca` ClusterIssuer
-10. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD; wait rollout
-11. `kubectl patch` — sets ArgoCD to insecure (HTTP) mode; wait restart
+6. Apply Sealed Secrets + cert-manager **in parallel** (background jobs); wait for both
+7. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
+8. `kubectl apply bootstrap/cert-manager-issuers.yaml` — creates `localhost-ca` ClusterIssuer
+9. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD
+10. Patch `argocd-cmd-params-cm` with `server.insecure: true` (before pod schedules — no restart needed)
+11. Wait for argocd-server rollout
 12. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `https://argocd.localhost` with TLS
 13. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
 
@@ -51,7 +51,6 @@ bootstrap/                    Makefile applies all of these directly (one-time)
   argocd-install.yaml         Official ArgoCD manifest
   argocd-ingress.yaml         argocd.localhost ingress (TLS via localhost-ca)
   argocd-root-app.yaml        Root Application → watches apps/ in this repo
-  server-insecure-patch.yaml
 
 docs/
   tls-acme.md                 Let's Encrypt DNS-01 setup (Cloudflare, Route53, generic)

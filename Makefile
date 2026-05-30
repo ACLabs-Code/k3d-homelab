@@ -91,13 +91,15 @@ create: check-docker check-kubectl check-k3d
 	kubectl apply -f bootstrap/local-path-config.yaml
 	kubectl rollout restart deployment/local-path-provisioner -n kube-system
 	kubectl rollout status deployment/local-path-provisioner -n kube-system --timeout=60s
-	@echo "Installing Sealed Secrets..."
-	kubectl apply -f bootstrap/sealed-secrets.yaml
-	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
-	@echo "Installing cert-manager..."
-	kubectl apply -f bootstrap/cert-manager.yaml
-	kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
-	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+	@echo "Installing Sealed Secrets and cert-manager in parallel..."
+	kubectl apply -f bootstrap/sealed-secrets.yaml & \
+	kubectl apply -f bootstrap/cert-manager.yaml & \
+	wait
+	@echo "Waiting for Sealed Secrets and cert-manager..."
+	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s & \
+	kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s & \
+	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s & \
+	wait
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=120s
 	@echo "Loading CA and creating ClusterIssuer..."
 	kubectl create secret tls localhost-ca-secret \
@@ -107,10 +109,8 @@ create: check-docker check-kubectl check-k3d
 	@echo "Installing ArgoCD..."
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -n argocd -f bootstrap/argocd-install.yaml
+	kubectl patch configmap argocd-cmd-params-cm -n argocd --patch '{"data":{"server.insecure":"true"}}'
 	kubectl rollout status deployment/argocd-server -n argocd --timeout=180s
-	@echo "Patching ArgoCD for insecure mode..."
-	kubectl patch deployment argocd-server -n argocd --patch-file bootstrap/server-insecure-patch.yaml
-	kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
 	kubectl apply -f bootstrap/argocd-ingress.yaml
 	@echo "Applying root Application..."
 	sed 's|REPO_URL_PLACEHOLDER|$(REPO_URL)|g' bootstrap/argocd-root-app.yaml | kubectl apply -f -
