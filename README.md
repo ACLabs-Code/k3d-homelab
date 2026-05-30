@@ -33,6 +33,26 @@ make create WORKERS=2
 
 ArgoCD credentials are printed by `make create` and `make info`.
 
+## Persistent storage
+
+`./data/` on your Mac is bind-mounted into all cluster nodes at `/mnt/data`. The default `local-path` StorageClass writes PV data there, so it survives `make recreate`.
+
+Apps just use standard PVCs — no special configuration needed:
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-app-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+Data directories appear in `./data/` as `pvc-<uid>_<namespace>_<pvc-name>/`. They are not automatically cleaned up when a PVC is deleted — manage `./data/` manually.
+
 ## TLS
 
 ArgoCD is available at `https://argocd.localhost`. A self-signed CA is auto-generated at `local/ca.crt` on first `make create`.
@@ -114,7 +134,7 @@ make check-tools                         Verify required tools are installed
 
 - ~~**Secrets management**~~ — Sealed Secrets v0.37.0 installed as part of bootstrap. Encrypt secrets with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time.
 - ~~**TLS**~~ — cert-manager v1.20.2 installed as part of bootstrap. Self-signed CA for `.localhost` (auto-generated, trust with `make ca-trust`). Real domain certs via Let's Encrypt DNS-01 — see [docs/tls-acme.md](docs/tls-acme.md).
-- **Persistence** — bind-mount host directories into k3d node containers via `k3d-config.yaml` so workload data (databases, media, etc.) survives `make recreate`.
+- ~~**Persistence**~~ — `./data/` on your Mac is bind-mounted into all cluster nodes at `/mnt/data`. The `local-path` StorageClass (default) uses this path, so PVC data survives `make recreate` automatically.
 
 ## Forking
 

@@ -25,9 +25,11 @@ make ca-trust                # trust local CA in macOS Keychain (sudo)
 ## Bootstrap sequence (what `make create` does)
 
 1. Auto-generate CA if `local/ca.crt` missing (`make ca-generate`)
-2. `k3d cluster create` — uses `k3d-config.yaml`; mounts Traefik HelmChartConfig via `--volume`
-3. Wait for `helm-install-traefik` job + traefik rollout
-4. `kubectl apply bootstrap/sealed-secrets.yaml` — installs Sealed Secrets controller
+2. Auto-create `./data/` directory
+3. `k3d cluster create` — mounts Traefik HelmChartConfig + `./data:/mnt/data` into all nodes
+4. Wait for `helm-install-traefik` job + traefik rollout
+5. Patch `local-path-config` ConfigMap → storage root becomes `/mnt/data`; restart provisioner
+6. `kubectl apply bootstrap/sealed-secrets.yaml` — installs Sealed Secrets controller
 5. Wait for sealed-secrets-controller rollout
 6. `kubectl apply bootstrap/cert-manager.yaml` — installs cert-manager
 7. Wait for cert-manager + webhook rollout + webhook pod ready
@@ -45,6 +47,7 @@ After step 7, ArgoCD owns everything. It watches `apps/` and creates child Appli
 
 ```
 bootstrap/                    Makefile applies all of these directly (one-time)
+  local-path-config.yaml      Reconfigures local-path-provisioner to use /mnt/data
   sealed-secrets.yaml         Sealed Secrets controller manifest
   cert-manager.yaml           cert-manager manifest
   cert-manager-issuers.yaml   localhost-ca ClusterIssuer
@@ -88,3 +91,4 @@ Then create an Application manifest in your app repo pointing ArgoCD at it.
 - CA is auto-generated on first `make create` — run `make ca-trust` once to avoid browser warnings
 - `local/ca.crt` + `local/ca.key` are gitignored and persist across `make recreate` — same CA, no re-trust needed
 - cert-manager webhook has a known K3S timing issue — bootstrap waits explicitly for webhook pod ready
+- `data/` directories (one per PV) are NOT cleaned up when a PVC is deleted — manage `./data/` manually

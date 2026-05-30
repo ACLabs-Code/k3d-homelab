@@ -14,5 +14,8 @@ local/*
 !local/.gitkeep
 !local/README.md
 
+# Persistent data (bind-mounted into k3d nodes)
+data/
+
 # Claude Code
 .claude/

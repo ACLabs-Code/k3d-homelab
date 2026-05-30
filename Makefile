@@ -80,11 +80,17 @@ create: check-docker check-kubectl check-k3d
 		echo "No CA found in local/ — generating one..."; \
 		$(MAKE) ca-generate; \
 	fi
+	@mkdir -p $(CURDIR)/data
 	k3d cluster create $(K3D_CONFIG_FLAGS) --agents $(WORKERS) \
-		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0"
+		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0" \
+		--volume "$(CURDIR)/data:/mnt/data@server:*;agent:*"
 	@echo "Waiting for Traefik..."
 	kubectl wait --for=condition=complete job/helm-install-traefik -n kube-system --timeout=120s
 	kubectl rollout status deployment/traefik -n kube-system --timeout=120s
+	@echo "Configuring persistent storage..."
+	kubectl apply -f bootstrap/local-path-config.yaml
+	kubectl rollout restart deployment/local-path-provisioner -n kube-system
+	kubectl rollout status deployment/local-path-provisioner -n kube-system --timeout=60s
 	@echo "Installing Sealed Secrets..."
 	kubectl apply -f bootstrap/sealed-secrets.yaml
 	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
