@@ -31,21 +31,17 @@ After step 6, ArgoCD owns everything. It syncs `apps/` and creates child Applica
 ## Architecture
 
 ```
-bootstrap/               Makefile applies these directly (one-time)
-  argocd-install.yaml    Official ArgoCD manifest
-  argocd-root-app.yaml   Root Application → watches apps/ in this repo
+bootstrap/                    Makefile applies all of these directly (one-time)
+  argocd-install.yaml         Official ArgoCD manifest
+  argocd-ingress.yaml         argocd.localhost ingress
+  argocd-root-app.yaml        Root Application → watches apps/ in this repo
   server-insecure-patch.yaml
 
-apps/                    ArgoCD watches this dir; add .yaml here to register apps
-  argocd.yaml            → manifests/argocd/
-
-manifests/               Actual k8s manifests, applied by ArgoCD
-  argocd/
-    ingress.yaml         argocd.localhost ingress
+apps/                         ArgoCD watches this dir; commit .yaml here to register apps
 
 cluster/
   traefik/
-    helmchartconfig.yaml  Traefik dashboard config (bootstrap only via --volume)
+    helmchartconfig.yaml      Traefik dashboard config (mounted via --volume at create)
 ```
 
 ## Adding an app repo

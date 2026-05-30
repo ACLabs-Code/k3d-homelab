@@ -66,6 +66,7 @@ create: check-docker check-kubectl check-k3d
 	@echo "Patching ArgoCD for insecure mode..."
 	kubectl patch deployment argocd-server -n argocd --patch-file bootstrap/server-insecure-patch.yaml
 	kubectl rollout status deployment/argocd-server -n argocd --timeout=60s
+	kubectl apply -f bootstrap/argocd-ingress.yaml
 	@echo "Applying root Application..."
 	sed 's|REPO_URL_PLACEHOLDER|$(REPO_URL)|g' bootstrap/argocd-root-app.yaml | kubectl apply -f -
 	@echo ""
