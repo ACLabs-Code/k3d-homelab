@@ -75,6 +75,7 @@ make check-tools                         Verify required tools are installed
 ## Planned
 
 - **Secrets management** — Sealed Secrets (Bitnami): encrypt secrets locally with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time. GitOps-native, no external dependencies.
+- **TLS** — cert-manager: automatic certificate provisioning for `.localhost` and real domains. Pairs with Traefik for HTTPS ingress.
 
 ## Forking
 
