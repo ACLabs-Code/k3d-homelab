@@ -33,6 +33,20 @@ make create WORKERS=2
 
 ArgoCD credentials are printed by `make create` and `make info`.
 
+## TLS
+
+ArgoCD is available at `https://argocd.localhost`. A self-signed CA is auto-generated at `local/ca.crt` on first `make create`.
+
+Trust it in your browser (once):
+
+```bash
+make ca-trust   # adds CA to macOS Keychain; restart browser after
+```
+
+To replace the auto-generated CA with your own, place `ca.crt` and `ca.key` in `local/` before running `make create`.
+
+For real domain certificates via Let's Encrypt DNS-01, see [docs/tls-acme.md](docs/tls-acme.md).
+
 ## Sealing secrets
 
 Install `kubeseal` locally (`brew install kubeseal`), then:
@@ -81,6 +95,8 @@ make argocd-add-repo REPO=x [TOKEN=x]   Register an app repo
 make argocd-list-repos                   List registered repos
 make argocd-list-apps                    List apps and sync status
 make kubeseal-cert                       Fetch Sealed Secrets public cert
+make ca-generate                         Generate CA keypair to local/
+make ca-trust                            Trust local CA in macOS Keychain
 make check-tools                         Verify required tools are installed
 ```
 
@@ -92,11 +108,12 @@ make check-tools                         Verify required tools are installed
 | Traefik | v2.x (bundled with K3S) |
 | ArgoCD | v2.12.7 |
 | Sealed Secrets | v0.37.0 |
+| cert-manager | v1.20.2 |
 
 ## Planned
 
 - ~~**Secrets management**~~ — Sealed Secrets v0.37.0 installed as part of bootstrap. Encrypt secrets with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time.
-- **TLS** — cert-manager: automatic certificate provisioning for `.localhost` and real domains. Pairs with Traefik for HTTPS ingress.
+- ~~**TLS**~~ — cert-manager v1.20.2 installed as part of bootstrap. Self-signed CA for `.localhost` (auto-generated, trust with `make ca-trust`). Real domain certs via Let's Encrypt DNS-01 — see [docs/tls-acme.md](docs/tls-acme.md).
 - **Persistence** — bind-mount host directories into k3d node containers via `k3d-config.yaml` so workload data (databases, media, etc.) survives `make recreate`.
 
 ## Forking

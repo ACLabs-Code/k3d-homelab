@@ -1,11 +1,12 @@
-CLUSTER_NAME          := homelab
-ARGOCD_VERSION        := v2.12.7
+CLUSTER_NAME           := homelab
+ARGOCD_VERSION         := v2.12.7
 SEALED_SECRETS_VERSION := v0.37.0
-K3S_VERSION           := v1.31.4-k3s1
-WORKERS        ?= 0
-MAX_WORKERS    := 5
-REPO_URL       := $(shell git remote get-url origin 2>/dev/null | sed 's|git@github.com:|https://github.com/|; s|\.git$$||')
-ARGOCD_PASSWORD ?= $(shell kubectl get secret argocd-initial-admin-secret -n argocd \
+CERT_MANAGER_VERSION   := v1.20.2
+K3S_VERSION            := v1.31.4-k3s1
+WORKERS                ?= 0
+MAX_WORKERS            := 5
+REPO_URL               := $(shell git remote get-url origin 2>/dev/null | sed 's|git@github.com:|https://github.com/|; s|\.git$$||')
+ARGOCD_PASSWORD        ?= $(shell kubectl get secret argocd-initial-admin-secret -n argocd \
 	-o jsonpath="{.data.password}" 2>/dev/null | base64 -d)
 
 -include local/.env
@@ -17,7 +18,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
-        kubeseal-cert \
+        kubeseal-cert ca-generate ca-trust \
         check-docker check-kubectl check-k3d check-kubeseal
 
 ## Help
@@ -26,7 +27,7 @@ help:
 	@echo "Usage: make <target> [OPTION=value]"
 	@echo ""
 	@echo "Cluster"
-	@echo "  create [WORKERS=N]   Create cluster + bootstrap ArgoCD (max WORKERS=$(MAX_WORKERS))"
+	@echo "  create [WORKERS=N]   Create cluster + bootstrap all components (max WORKERS=$(MAX_WORKERS))"
 	@echo "  delete               Destroy cluster"
 	@echo "  recreate [WORKERS=N] Delete and recreate cluster"
 	@echo "  scale WORKERS=N      Set total agent (worker) count"
@@ -34,7 +35,11 @@ help:
 	@echo ""
 	@echo "Observability"
 	@echo "  status               Cluster, node, and pod health"
-	@echo "  info                 Print access URLs"
+	@echo "  info                 Print access URLs and credentials"
+	@echo ""
+	@echo "TLS"
+	@echo "  ca-generate          Generate CA keypair → local/ca.crt + local/ca.key"
+	@echo "  ca-trust             Trust local CA in macOS Keychain (sudo)"
 	@echo ""
 	@echo "ArgoCD"
 	@echo "  argocd-password                          Print admin credentials"
@@ -71,6 +76,10 @@ create: check-docker check-kubectl check-k3d
 	@if [ -z "$(REPO_URL)" ]; then \
 		echo "Error: could not detect repo URL from git remote"; exit 1; \
 	fi
+	@if [ ! -f local/ca.crt ] || [ ! -f local/ca.key ]; then \
+		echo "No CA found in local/ — generating one..."; \
+		$(MAKE) ca-generate; \
+	fi
 	k3d cluster create $(K3D_CONFIG_FLAGS) --agents $(WORKERS) \
 		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0"
 	@echo "Waiting for Traefik..."
@@ -79,6 +88,16 @@ create: check-docker check-kubectl check-k3d
 	@echo "Installing Sealed Secrets..."
 	kubectl apply -f bootstrap/sealed-secrets.yaml
 	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
+	@echo "Installing cert-manager..."
+	kubectl apply -f bootstrap/cert-manager.yaml
+	kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
+	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=120s
+	@echo "Loading CA and creating ClusterIssuer..."
+	kubectl create secret tls localhost-ca-secret \
+		--cert=local/ca.crt --key=local/ca.key \
+		-n cert-manager --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f bootstrap/cert-manager-issuers.yaml
 	@echo "Installing ArgoCD..."
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -n argocd -f bootstrap/argocd-install.yaml
@@ -144,12 +163,33 @@ info:
 	@echo ""
 	@echo "=== Access URLs ==="
 	@echo "  Traefik Dashboard : http://traefik.localhost/dashboard/"
-	@echo "  ArgoCD UI         : http://argocd.localhost"
+	@echo "  ArgoCD UI         : https://argocd.localhost"
 	@echo ""
 	@echo "=== ArgoCD Credentials ==="
 	@echo "  Username : admin"
 	@printf "  Password : "; kubectl get secret argocd-initial-admin-secret -n argocd \
 		-o jsonpath="{.data.password}" 2>/dev/null | base64 -d; echo ""
+
+## TLS
+
+ca-generate:
+	@mkdir -p local
+	openssl genrsa -out local/ca.key 4096
+	openssl req -new -x509 -key local/ca.key \
+		-out local/ca.crt \
+		-days 3650 \
+		-subj "/CN=k3d-homelab-ca/O=k3d-homelab"
+	@echo "CA generated at local/ca.crt and local/ca.key"
+	@echo "Run 'make ca-trust' to trust it in macOS Keychain"
+
+ca-trust:
+	@if [ ! -f local/ca.crt ]; then \
+		echo "Error: local/ca.crt not found. Run: make ca-generate"; exit 1; \
+	fi
+	sudo security add-trusted-cert -d -r trustRoot \
+		-k /Library/Keychains/System.keychain \
+		local/ca.crt
+	@echo "CA trusted. Restart your browser for changes to take effect."
 
 ## ArgoCD
 
@@ -157,7 +197,7 @@ argocd-password: check-kubectl
 	@echo "Username : admin"
 	@printf "Password : "; kubectl get secret argocd-initial-admin-secret -n argocd \
 		-o jsonpath="{.data.password}" | base64 -d; echo ""
-	@echo "URL      : http://argocd.localhost"
+	@echo "URL      : https://argocd.localhost"
 
 argocd-set-password: check-kubectl
 	@if [ -z "$(NEW_PASSWORD)" ]; then \
