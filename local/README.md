@@ -26,13 +26,13 @@ Common uses:
 ```yaml
 # local/k3d-config.yaml
 
-# Bind-mount a host directory into all nodes for persistent workload data
-volumes:
-  - volume: /Users/yourname/homelab-data:/mnt/data
-    nodeFilters: [server:0, agent:*]
-
 # Expose an extra port
 ports:
   - port: 8080:8080
     nodeFilters: [loadbalancer]
+
+# Bind-mount an additional host directory (note: /mnt/data is already reserved)
+volumes:
+  - volume: /Users/yourname/media:/mnt/media
+    nodeFilters: [server:*, agent:*]
 ```

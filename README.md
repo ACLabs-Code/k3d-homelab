@@ -29,7 +29,7 @@ make create WORKERS=2
 | Service | URL |
 |---|---|
 | Traefik Dashboard | http://traefik.localhost/dashboard/ |
-| ArgoCD | http://argocd.localhost |
+| ArgoCD | https://argocd.localhost |
 
 ArgoCD credentials are printed by `make create` and `make info`.
 
