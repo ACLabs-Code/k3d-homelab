@@ -16,6 +16,14 @@ echo "Installing k3d..."
 curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 echo "k3d $(k3d version) installed."
 
+echo "Installing kubeseal..."
+KUBESEAL_VERSION=$(curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'][1:])")
+curl -sLO "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-${KUBESEAL_VERSION}-${OS}-${ARCH}.tar.gz"
+tar -xzf "kubeseal-${KUBESEAL_VERSION}-${OS}-${ARCH}.tar.gz" kubeseal
+sudo mv kubeseal /usr/local/bin/kubeseal
+rm "kubeseal-${KUBESEAL_VERSION}-${OS}-${ARCH}.tar.gz"
+echo "kubeseal $(kubeseal --version) installed."
+
 echo ""
-echo "Done. Verify with: kubectl version --client && k3d version"
-echo "Or install via Homebrew: brew install kubectl k3d"
+echo "Done. Verify with: kubectl version --client && k3d version && kubeseal --version"
+echo "Or install via Homebrew: brew install kubectl k3d kubeseal"

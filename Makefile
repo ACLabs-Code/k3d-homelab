@@ -1,6 +1,7 @@
-CLUSTER_NAME   := homelab
-ARGOCD_VERSION := v2.12.7
-K3S_VERSION    := v1.31.4-k3s1
+CLUSTER_NAME          := homelab
+ARGOCD_VERSION        := v2.12.7
+SEALED_SECRETS_VERSION := v0.37.0
+K3S_VERSION           := v1.31.4-k3s1
 WORKERS        ?= 0
 MAX_WORKERS    := 5
 REPO_URL       := $(shell git remote get-url origin 2>/dev/null | sed 's|git@github.com:|https://github.com/|; s|\.git$$||')
@@ -16,6 +17,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
+        kubeseal-cert \
         check-docker check-kubectl check-k3d
 
 ## Help
@@ -40,6 +42,9 @@ help:
 	@echo "  argocd-add-repo REPO=<url> [TOKEN=<tok>] Register an app repo"
 	@echo "  argocd-list-repos                        List registered repos"
 	@echo "  argocd-list-apps                         List apps and sync status"
+	@echo ""
+	@echo "Sealed Secrets"
+	@echo "  kubeseal-cert        Fetch controller public cert to local/sealed-secrets-cert.pem"
 	@echo ""
 	@echo "Toolchain"
 	@echo "  check-tools          Verify all required tools are installed"
@@ -66,6 +71,9 @@ create: check-docker check-kubectl check-k3d
 	@echo "Waiting for Traefik..."
 	kubectl wait --for=condition=complete job/helm-install-traefik -n kube-system --timeout=120s
 	kubectl rollout status deployment/traefik -n kube-system --timeout=120s
+	@echo "Installing Sealed Secrets..."
+	kubectl apply -f bootstrap/sealed-secrets.yaml
+	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s
 	@echo "Installing ArgoCD..."
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -n argocd -f bootstrap/argocd-install.yaml
@@ -200,6 +208,17 @@ argocd-list-apps: check-kubectl
 	curl -sf http://argocd.localhost/api/v1/applications \
 		-H "Authorization: Bearer $$TOKEN" | \
 		python3 -c "import sys,json; apps=json.load(sys.stdin).get('items') or []; [print('No applications found.') if not apps else (print(f\"  {'NAME':<25} {'SYNC':<12} HEALTH\"), print(f\"  {'-'*25} {'-'*12} {'-'*10}\"), [print(f\"  {a.get('metadata',{}).get('name','?'):<25} {a.get('status',{}).get('sync',{}).get('status','?'):<12} {a.get('status',{}).get('health',{}).get('status','?')}\") for a in apps])]"
+
+## Sealed Secrets
+
+kubeseal-cert: check-kubectl
+	@which kubeseal > /dev/null 2>&1 || (echo "Error: kubeseal not found. Run: brew install kubeseal"; exit 1)
+	kubeseal --fetch-cert \
+		--controller-name=sealed-secrets-controller \
+		--controller-namespace=kube-system \
+		> local/sealed-secrets-cert.pem
+	@echo "Cert saved to local/sealed-secrets-cert.pem"
+	@echo "Encrypt a secret: kubeseal --cert local/sealed-secrets-cert.pem -f secret.yaml -w sealed-secret.yaml"
 
 ## Pre-flight checks
 

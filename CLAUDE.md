@@ -17,17 +17,20 @@ make argocd-set-password NEW_PASSWORD=<pw>
 make argocd-add-repo REPO=<url> [TOKEN=<tok>]
 make argocd-list-repos
 make argocd-list-apps
+make kubeseal-cert           # fetch controller public cert → local/sealed-secrets-cert.pem
 ```
 
 ## Bootstrap sequence (what `make create` does)
 
 1. `k3d cluster create` — uses `k3d-config.yaml`; mounts `cluster/traefik/helmchartconfig.yaml` via `--volume` so Traefik dashboard is configured before first pod start
 2. Wait for `helm-install-traefik` job + traefik rollout
-3. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD
-4. Wait for argocd-server rollout
-5. `kubectl patch` — sets ArgoCD to insecure (HTTP) mode; waits for restart
-6. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `argocd.localhost`
-7. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
+3. `kubectl apply bootstrap/sealed-secrets.yaml` — installs Sealed Secrets controller
+4. Wait for sealed-secrets-controller rollout
+5. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD
+6. Wait for argocd-server rollout
+7. `kubectl patch` — sets ArgoCD to insecure (HTTP) mode; waits for restart
+8. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `argocd.localhost`
+9. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
 
 After step 7, ArgoCD owns everything. It watches `apps/` and creates child Applications from any `.yaml` committed there.
 
@@ -35,6 +38,7 @@ After step 7, ArgoCD owns everything. It watches `apps/` and creates child Appli
 
 ```
 bootstrap/                    Makefile applies all of these directly (one-time)
+  sealed-secrets.yaml         Sealed Secrets controller manifest
   argocd-install.yaml         Official ArgoCD manifest
   argocd-ingress.yaml         argocd.localhost ingress
   argocd-root-app.yaml        Root Application → watches apps/ in this repo

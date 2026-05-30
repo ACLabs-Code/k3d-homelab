@@ -33,6 +33,23 @@ make create WORKERS=2
 
 ArgoCD credentials are printed by `make create` and `make info`.
 
+## Sealing secrets
+
+Install `kubeseal` locally (`brew install kubeseal`), then:
+
+```bash
+# Fetch the controller's public cert (once per cluster)
+make kubeseal-cert
+
+# Encrypt a secret
+kubeseal --cert local/sealed-secrets-cert.pem -f secret.yaml -w sealed-secret.yaml
+
+# Commit the sealed secret — safe to push to git
+git add sealed-secret.yaml && git commit -m "add sealed secret"
+```
+
+`local/sealed-secrets-cert.pem` is gitignored. Re-run `make kubeseal-cert` after `make recreate`.
+
 ## Deploying apps
 
 Register your app repo with ArgoCD, then point ArgoCD at it via an Application manifest in your own repo.
@@ -74,7 +91,7 @@ make check-tools                         Verify required tools are installed
 
 ## Planned
 
-- **Secrets management** — Sealed Secrets (Bitnami): encrypt secrets locally with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time. GitOps-native, no external dependencies.
+- ~~**Secrets management**~~ — Sealed Secrets v0.37.0 installed as part of bootstrap. Encrypt secrets with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time.
 - **TLS** — cert-manager: automatic certificate provisioning for `.localhost` and real domains. Pairs with Traefik for HTTPS ingress.
 - **Persistence** — bind-mount host directories into k3d node containers via `k3d-config.yaml` so workload data (databases, media, etc.) survives `make recreate`.
 
