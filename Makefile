@@ -7,6 +7,11 @@ REPO_URL       := $(shell git remote get-url origin 2>/dev/null | sed 's|git@git
 ARGOCD_PASSWORD ?= $(shell kubectl get secret argocd-initial-admin-secret -n argocd \
 	-o jsonpath="{.data.password}" 2>/dev/null | base64 -d)
 
+-include local/.env
+
+K3D_LOCAL_CONFIG := $(wildcard local/k3d-config.yaml)
+K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $(K3D_LOCAL_CONFIG))
+
 .DEFAULT_GOAL := help
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
@@ -56,7 +61,7 @@ create: check-docker check-kubectl check-k3d
 	@if [ -z "$(REPO_URL)" ]; then \
 		echo "Error: could not detect repo URL from git remote"; exit 1; \
 	fi
-	k3d cluster create --config k3d-config.yaml --agents $(WORKERS) \
+	k3d cluster create $(K3D_CONFIG_FLAGS) --agents $(WORKERS) \
 		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0"
 	@echo "Waiting for Traefik..."
 	kubectl wait --for=condition=complete job/helm-install-traefik -n kube-system --timeout=120s

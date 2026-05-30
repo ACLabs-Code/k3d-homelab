@@ -10,6 +10,9 @@
 # Local overrides
 *.local
 .env
+local/*
+!local/.gitkeep
+!local/README.md
 
 # Claude Code
 .claude/
