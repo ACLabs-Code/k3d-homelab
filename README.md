@@ -16,7 +16,7 @@ brew install kubectl k3d
 make create
 ```
 
-That's it. The cluster is up, ArgoCD is running, and watching this repo's `apps/` directory.
+That's it. The cluster is up, ArgoCD is running, and watching this repo's `apps/` directory. Access URLs and credentials are printed at the end.
 
 Multi-node:
 
@@ -31,7 +31,7 @@ make create WORKERS=2
 | Traefik Dashboard | http://traefik.localhost/dashboard/ |
 | ArgoCD | http://argocd.localhost |
 
-ArgoCD credentials: `admin` / `make argocd-password`
+ArgoCD credentials are printed by `make create` and `make info`.
 
 ## Deploying apps
 
@@ -53,9 +53,9 @@ make argocd-list-apps
 ```
 make create [WORKERS=N]                  Create cluster + bootstrap ArgoCD
 make delete                              Destroy cluster
-make recreate [WORKERS=N]               Delete and recreate
+make recreate [WORKERS=N]                Delete and recreate
 make status                              Cluster, node, and ArgoCD app health
-make info                                Print access URLs
+make info                                Print access URLs and credentials
 make argocd-password                     Print ArgoCD admin credentials
 make argocd-set-password NEW_PASSWORD=x  Set ArgoCD admin password
 make argocd-add-repo REPO=x [TOKEN=x]   Register an app repo
@@ -72,6 +72,10 @@ make check-tools                         Verify required tools are installed
 | Traefik | v2.x (bundled with K3S) |
 | ArgoCD | v2.12.7 |
 
+## Planned
+
+- **Secrets management** — Sealed Secrets (Bitnami): encrypt secrets locally with `kubeseal`, commit ciphertext to git, cluster decrypts at apply time. GitOps-native, no external dependencies.
+
 ## Forking
 
-If you fork this repo, update `repoURL` in `apps/argocd.yaml` to point at your fork. The Makefile detects your git remote automatically for the bootstrap step.
+Clone and run `make create`. The Makefile detects your git remote automatically for the bootstrap step.
