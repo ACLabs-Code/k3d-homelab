@@ -85,7 +85,8 @@ create: check-docker check-kubectl check-k3d
 		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0" \
 		--volume "$(CURDIR)/data:/mnt/data@server:*;agent:*"
 	@echo "Waiting for Traefik..."
-	kubectl wait --for=condition=complete job/helm-install-traefik -n kube-system --timeout=120s
+	until kubectl get job/helm-install-traefik-crd job/helm-install-traefik -n kube-system >/dev/null 2>&1; do sleep 2; done
+	kubectl wait --for=condition=complete job/helm-install-traefik-crd job/helm-install-traefik -n kube-system --timeout=120s
 	kubectl rollout status deployment/traefik -n kube-system --timeout=120s
 	@echo "Configuring persistent storage..."
 	kubectl apply -f bootstrap/local-path-config.yaml
@@ -108,7 +109,7 @@ create: check-docker check-kubectl check-k3d
 	kubectl apply -f bootstrap/cert-manager-issuers.yaml
 	@echo "Installing ArgoCD..."
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -n argocd -f bootstrap/argocd-install.yaml
+	kubectl apply --server-side -n argocd -f bootstrap/argocd-install.yaml
 	kubectl patch configmap argocd-cmd-params-cm -n argocd --patch '{"data":{"server.insecure":"true"}}'
 	kubectl rollout status deployment/argocd-server -n argocd --timeout=180s
 	kubectl apply -f bootstrap/argocd-ingress.yaml
