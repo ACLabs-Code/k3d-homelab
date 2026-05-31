@@ -124,9 +124,9 @@ make check-tools                         Verify required tools are installed
 
 | Component | Version |
 |---|---|
-| K3S | v1.31.4-k3s1 |
-| Traefik | v2.x (bundled with K3S) |
-| ArgoCD | v2.12.7 |
+| K3S | v1.36.1-k3s1 |
+| Traefik | v3.x (bundled with K3S) |
+| ArgoCD | v3.4.3 |
 | Sealed Secrets | v0.37.0 |
 | cert-manager | v1.20.2 |
 
