@@ -207,19 +207,28 @@ argocd-password: check-kubectl
 	@echo "URL      : https://argocd.localhost"
 
 argocd-set-password: check-kubectl
-	@if [ -z "$(NEW_PASSWORD)" ]; then \
-		echo "Usage: make argocd-set-password NEW_PASSWORD=<password>"; exit 1; \
-	fi
-	@TOKEN=$$(curl -sf http://argocd.localhost/api/v1/session \
+	@NEW_PASSWORD="$(NEW_PASSWORD)"; \
+	if [ -z "$$NEW_PASSWORD" ]; then \
+		printf "New password: "; \
+		read -rs NEW_PASSWORD; echo; \
+		printf "Confirm password: "; \
+		read -rs CONFIRM; echo; \
+		if [ "$$NEW_PASSWORD" != "$$CONFIRM" ]; then \
+			echo "Passwords do not match."; exit 1; \
+		fi; \
+	fi; \
+	TOKEN=$$(curl -sf http://argocd.localhost/api/v1/session \
 		-H "Content-Type: application/json" \
 		-d "{\"username\":\"admin\",\"password\":\"$(ARGOCD_PASSWORD)\"}" | \
 		python3 -c "import sys,json; print(json.load(sys.stdin)['token'])"); \
 	RESULT=$$(curl -sf -X PUT http://argocd.localhost/api/v1/account/password \
 		-H "Authorization: Bearer $$TOKEN" \
 		-H "Content-Type: application/json" \
-		-d "{\"currentPassword\":\"$(ARGOCD_PASSWORD)\",\"newPassword\":\"$(NEW_PASSWORD)\"}"); \
+		-d "{\"currentPassword\":\"$(ARGOCD_PASSWORD)\",\"newPassword\":\"$$NEW_PASSWORD\"}"); \
 	if [ "$$RESULT" = "{}" ]; then \
 		echo "Password updated."; \
+		kubectl patch secret argocd-initial-admin-secret -n argocd \
+			-p "{\"data\":{\"password\":\"$$(printf '%s' "$$NEW_PASSWORD" | base64)\"}}" > /dev/null; \
 	else \
 		echo "Error: $$RESULT"; exit 1; \
 	fi
@@ -251,6 +260,25 @@ argocd-list-repos: check-kubectl
 	curl -sf http://argocd.localhost/api/v1/repositories \
 		-H "Authorization: Bearer $$TOKEN" | \
 		python3 -c "import sys,json; repos=json.load(sys.stdin).get('items') or []; [print('No repositories registered.') if not repos else None]; [print(f\"  {r.get('repo','?')}  [{'OK' if r.get('connectionState',{}).get('status')=='Successful' else r.get('connectionState',{}).get('status','?')}]\") for r in repos]"
+
+argocd-add-source: check-kubectl
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make argocd-add-source REPO=<url> [SOURCE_PATH=.] [REVISION=HEAD]"; exit 1; \
+	fi
+	@REVISION="$(if $(REVISION),$(REVISION),HEAD)"; \
+	SOURCE_PATH="$(if $(SOURCE_PATH),$(SOURCE_PATH),.)"; \
+	HAS_SOURCES=$$(kubectl get application root -n argocd -o jsonpath='{.spec.sources}' 2>/dev/null); \
+	if [ -n "$$HAS_SOURCES" ] && [ "$$HAS_SOURCES" != "null" ]; then \
+		kubectl patch application root -n argocd --type=json \
+			-p "[{\"op\":\"add\",\"path\":\"/spec/sources/-\",\"value\":{\"repoURL\":\"$(REPO)\",\"targetRevision\":\"$$REVISION\",\"path\":\"$$SOURCE_PATH\"}}]"; \
+	else \
+		EXISTING_REPO=$$(kubectl get application root -n argocd -o jsonpath='{.spec.source.repoURL}'); \
+		EXISTING_PATH=$$(kubectl get application root -n argocd -o jsonpath='{.spec.source.path}'); \
+		EXISTING_REV=$$(kubectl get application root -n argocd -o jsonpath='{.spec.source.targetRevision}'); \
+		kubectl patch application root -n argocd --type=json \
+			-p "[{\"op\":\"add\",\"path\":\"/spec/sources\",\"value\":[{\"repoURL\":\"$$EXISTING_REPO\",\"targetRevision\":\"$$EXISTING_REV\",\"path\":\"$$EXISTING_PATH\"},{\"repoURL\":\"$(REPO)\",\"targetRevision\":\"$$REVISION\",\"path\":\"$$SOURCE_PATH\"}]},{\"op\":\"remove\",\"path\":\"/spec/source\"}]"; \
+	fi
+	@echo "Source added: $(REPO)"
 
 argocd-list-apps: check-kubectl
 	@TOKEN=$$(curl -sf http://argocd.localhost/api/v1/session \

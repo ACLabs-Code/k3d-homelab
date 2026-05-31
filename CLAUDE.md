@@ -15,6 +15,7 @@ make info                # access URLs + ArgoCD credentials
 make argocd-password     # print ArgoCD credentials
 make argocd-set-password NEW_PASSWORD=<pw>
 make argocd-add-repo REPO=<url> [TOKEN=<tok>]
+make argocd-add-source REPO=<url> [SOURCE_PATH=.] [REVISION=HEAD]
 make argocd-list-repos
 make argocd-list-apps
 make kubeseal-cert           # fetch controller public cert → local/sealed-secrets-cert.pem
