@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: headlamp
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.io
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/headlamp/
+    chart: headlamp
+    targetRevision: 0.42.0
+    helm:
+      releaseName: headlamp
+      values: |
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          annotations:
+            cert-manager.io/cluster-issuer: localhost-ca
+          hosts:
+            - host: headlamp.localhost
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - secretName: headlamp-tls
+              hosts:
+                - headlamp.localhost
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: headlamp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

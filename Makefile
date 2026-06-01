@@ -227,6 +227,7 @@ info:
 	@echo "=== Access URLs ==="
 	@echo "  Traefik Dashboard : http://traefik.localhost/dashboard/"
 	@echo "  ArgoCD UI         : https://argocd.localhost"
+	@echo "  Headlamp          : https://headlamp.localhost"
 	@echo ""
 	@echo "=== ArgoCD Credentials ==="
 	@echo "  Username : admin"

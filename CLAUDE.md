@@ -64,6 +64,7 @@ docs/
   tls-acme.md                 Let's Encrypt DNS-01 setup (Cloudflare, Route53, generic)
 
 apps/                         ArgoCD watches this dir; commit .yaml here to register apps
+  headlamp.yaml               Headlamp dashboard (https://headlamp.localhost)
 
 cluster/
   traefik/
