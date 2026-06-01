@@ -19,7 +19,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
-        update-manifests \
+        headlamp-token update-manifests \
         seal sealed-secrets-backup kubeseal-cert ca-generate ca-trust \
         check-docker check-kubectl check-k3d check-kubeseal
 
@@ -56,6 +56,9 @@ help:
 	@echo "  seal NAME=<name> [NAMESPACE=<ns>]  Seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml"
 	@echo "  sealed-secrets-backup              Back up controller keypair → local/sealed-secrets-key.json"
 	@echo "  kubeseal-cert                      Fetch controller public cert → local/sealed-secrets-cert.pem"
+	@echo ""
+	@echo "Headlamp"
+	@echo "  headlamp-token       Print a Headlamp login token (valid 1 year)"
 	@echo ""
 	@echo "Manifests"
 	@echo "  update-manifests     Re-fetch bootstrap manifests from GitHub at current version pins"
@@ -360,6 +363,11 @@ argocd-list-apps: check-kubectl
 	curl -sf http://argocd.localhost/api/v1/applications \
 		-H "Authorization: Bearer $$TOKEN" | \
 		python3 -c "import sys,json; apps=json.load(sys.stdin).get('items') or []; [print('No applications found.') if not apps else (print(f\"  {'NAME':<25} {'SYNC':<12} HEALTH\"), print(f\"  {'-'*25} {'-'*12} {'-'*10}\"), [print(f\"  {a.get('metadata',{}).get('name','?'):<25} {a.get('status',{}).get('sync',{}).get('status','?'):<12} {a.get('status',{}).get('health',{}).get('status','?')}\") for a in apps])]"
+
+## Headlamp
+
+headlamp-token: check-kubectl
+	@kubectl create token headlamp -n headlamp --duration=8760h
 
 ## Manifest management
 
