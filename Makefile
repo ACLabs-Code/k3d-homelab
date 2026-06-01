@@ -8,6 +8,7 @@ MAX_WORKERS            := 5
 REPO_URL               := $(shell git remote get-url origin 2>/dev/null | sed 's|git@github.com:|https://github.com/|; s|\.git$$||')
 ARGOCD_PASSWORD        ?= $(shell kubectl get secret argocd-initial-admin-secret -n argocd \
 	-o jsonpath="{.data.password}" 2>/dev/null | base64 -d)
+ARGOCD_DESIRED_PASSWORD ?=
 
 -include local/.env
 
@@ -18,7 +19,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
-        kubeseal-cert ca-generate ca-trust \
+        seal sealed-secrets-backup kubeseal-cert ca-generate ca-trust \
         check-docker check-kubectl check-k3d check-kubeseal
 
 ## Help
@@ -43,13 +44,17 @@ help:
 	@echo ""
 	@echo "ArgoCD"
 	@echo "  argocd-password                          Print admin credentials"
-	@echo "  argocd-set-password NEW_PASSWORD=<pw>    Set admin password"
-	@echo "  argocd-add-repo REPO=<url> [TOKEN=<tok>] Register an app repo"
+	@echo "  argocd-set-password NEW_PASSWORD=<pw>    Set admin password (saves to local/.env)"
+	@echo "  argocd-add-repo REPO=<url> [TOKEN=<tok>] Register an app repo (saves to local/argocd-repos/)"
 	@echo "  argocd-list-repos                        List registered repos"
 	@echo "  argocd-list-apps                         List apps and sync status"
+	@echo "  Tip: set ARGOCD_DESIRED_PASSWORD in local/.env to restore password on recreate"
+	@echo "  Tip: place configmap patches in local/argocd-config/ to restore on recreate"
 	@echo ""
 	@echo "Sealed Secrets"
-	@echo "  kubeseal-cert        Fetch controller public cert to local/sealed-secrets-cert.pem"
+	@echo "  seal NAME=<name> [NAMESPACE=<ns>]  Seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml"
+	@echo "  sealed-secrets-backup              Back up controller keypair → local/sealed-secrets-key.json"
+	@echo "  kubeseal-cert                      Fetch controller public cert → local/sealed-secrets-cert.pem"
 	@echo ""
 	@echo "Toolchain"
 	@echo "  check-tools          Verify all required tools are installed"
@@ -80,10 +85,10 @@ create: check-docker check-kubectl check-k3d
 		echo "No CA found in local/ — generating one..."; \
 		$(MAKE) ca-generate; \
 	fi
-	@mkdir -p $(CURDIR)/data
+	@mkdir -p $(CURDIR)/local/data/volumes
 	k3d cluster create $(K3D_CONFIG_FLAGS) --agents $(WORKERS) \
 		--volume "$(CURDIR)/cluster/traefik/helmchartconfig.yaml:/var/lib/rancher/k3s/server/manifests/traefik-config.yaml@server:0" \
-		--volume "$(CURDIR)/data:/mnt/data@server:*;agent:*"
+		--volume "$(CURDIR)/local/data:/mnt/data@server:*;agent:*"
 	@echo "Waiting for Traefik..."
 	until kubectl get job/helm-install-traefik-crd job/helm-install-traefik -n kube-system >/dev/null 2>&1; do sleep 2; done
 	kubectl wait --for=condition=complete job/helm-install-traefik-crd job/helm-install-traefik -n kube-system --timeout=120s
@@ -92,6 +97,10 @@ create: check-docker check-kubectl check-k3d
 	kubectl apply -f bootstrap/local-path-config.yaml
 	kubectl rollout restart deployment/local-path-provisioner -n kube-system
 	kubectl rollout status deployment/local-path-provisioner -n kube-system --timeout=60s
+	@if [ -f local/sealed-secrets-key.json ]; then \
+		echo "Restoring Sealed Secrets key..."; \
+		kubectl apply -f local/sealed-secrets-key.json; \
+	fi
 	@echo "Installing Sealed Secrets and cert-manager in parallel..."
 	kubectl apply -f bootstrap/sealed-secrets.yaml & \
 	kubectl apply -f bootstrap/cert-manager.yaml & \
@@ -102,6 +111,21 @@ create: check-docker check-kubectl check-k3d
 	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s & \
 	wait
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=120s
+	@echo "Backing up Sealed Secrets key..."
+	@until kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active --no-headers 2>/dev/null | grep -q .; do sleep 2; done
+	@kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active -o json | \
+		python3 -c "import sys,json; obj=json.load(sys.stdin); strip=['resourceVersion','uid','creationTimestamp','managedFields','selfLink','generation','annotations']; [[m.pop(f,None) for f in strip] for item in obj.get('items',[]) for m in [item.get('metadata',{})]]; print(json.dumps(obj,indent=2))" \
+		> local/sealed-secrets-key.json
+	@echo "Key backed up to local/sealed-secrets-key.json"
+	@if which kubeseal > /dev/null 2>&1; then \
+		kubeseal --fetch-cert \
+			--controller-name=sealed-secrets-controller \
+			--controller-namespace=kube-system \
+			> local/sealed-secrets-cert.pem; \
+		echo "Cert saved to local/sealed-secrets-cert.pem"; \
+	else \
+		echo "kubeseal not installed — skipping cert fetch (run: brew install kubeseal && make kubeseal-cert)"; \
+	fi
 	@echo "Loading CA and creating ClusterIssuer..."
 	kubectl create secret tls localhost-ca-secret \
 		--cert=local/ca.crt --key=local/ca.key \
@@ -112,7 +136,35 @@ create: check-docker check-kubectl check-k3d
 	kubectl apply --server-side -n argocd -f bootstrap/argocd-install.yaml
 	kubectl patch configmap argocd-cmd-params-cm -n argocd --patch '{"data":{"server.insecure":"true"}}'
 	kubectl rollout status deployment/argocd-server -n argocd --timeout=180s
+	@if ls local/argocd-repos/*.yaml >/dev/null 2>&1; then \
+		echo "Restoring ArgoCD repository credentials..."; \
+		kubectl apply -f local/argocd-repos/; \
+	fi
+	@if ls local/argocd-config/*.yaml >/dev/null 2>&1; then \
+		echo "Restoring ArgoCD configuration..."; \
+		kubectl apply -f local/argocd-config/; \
+	fi
 	kubectl apply -f bootstrap/argocd-ingress.yaml
+	@if [ -n "$(ARGOCD_DESIRED_PASSWORD)" ]; then \
+		echo "Setting ArgoCD admin password..."; \
+		INITIAL_PW=$$(kubectl get secret argocd-initial-admin-secret -n argocd \
+			-o jsonpath="{.data.password}" | base64 -d); \
+		TOKEN=$$(curl -sf http://argocd.localhost/api/v1/session \
+			-H "Content-Type: application/json" \
+			-d "{\"username\":\"admin\",\"password\":\"$$INITIAL_PW\"}" | \
+			python3 -c "import sys,json; print(json.load(sys.stdin)['token'])"); \
+		RESULT=$$(curl -sf -X PUT http://argocd.localhost/api/v1/account/password \
+			-H "Authorization: Bearer $$TOKEN" \
+			-H "Content-Type: application/json" \
+			-d "{\"currentPassword\":\"$$INITIAL_PW\",\"newPassword\":\"$(ARGOCD_DESIRED_PASSWORD)\"}"); \
+		if [ "$$RESULT" = "{}" ]; then \
+			echo "Password set."; \
+			kubectl patch secret argocd-initial-admin-secret -n argocd \
+				-p "{\"data\":{\"password\":\"$$(printf '%s' '$(ARGOCD_DESIRED_PASSWORD)' | base64)\"}}" > /dev/null; \
+		else \
+			echo "Warning: failed to set password: $$RESULT"; \
+		fi; \
+	fi
 	@echo "Applying root Application..."
 	sed 's|REPO_URL_PLACEHOLDER|$(REPO_URL)|g' bootstrap/argocd-root-app.yaml | kubectl apply -f -
 	@echo ""
@@ -229,6 +281,12 @@ argocd-set-password: check-kubectl
 		echo "Password updated."; \
 		kubectl patch secret argocd-initial-admin-secret -n argocd \
 			-p "{\"data\":{\"password\":\"$$(printf '%s' "$$NEW_PASSWORD" | base64)\"}}" > /dev/null; \
+		if grep -q '^ARGOCD_DESIRED_PASSWORD=' local/.env 2>/dev/null; then \
+			sed -i '' "s|^ARGOCD_DESIRED_PASSWORD=.*|ARGOCD_DESIRED_PASSWORD=$$NEW_PASSWORD|" local/.env; \
+		else \
+			printf '\nARGOCD_DESIRED_PASSWORD=%s\n' "$$NEW_PASSWORD" >> local/.env; \
+		fi; \
+		echo "Password saved to local/.env"; \
 	else \
 		echo "Error: $$RESULT"; exit 1; \
 	fi
@@ -250,7 +308,16 @@ argocd-add-repo: check-kubectl
 		-H "Authorization: Bearer $$TOKEN" \
 		-H "Content-Type: application/json" \
 		-d "$$PAYLOAD"); \
-	echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin); print('Registered:', r.get('repo','?'))"
+	echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin); print('Registered:', r.get('repo','?'))"; \
+	mkdir -p local/argocd-repos; \
+	SAFE_NAME=$$(echo "$(REPO)" | sed 's|https://||; s|http://||; s|[/.]|-|g'); \
+	SECRET_FILE=local/argocd-repos/$$SAFE_NAME.yaml; \
+	if [ -n "$(TOKEN)" ]; then \
+		printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: repo-%s\n  namespace: argocd\n  labels:\n    argocd.argoproj.io/secret-type: repository\nstringData:\n  type: git\n  url: %s\n  username: git\n  password: %s\n' "$$SAFE_NAME" "$(REPO)" "$(TOKEN)" > $$SECRET_FILE; \
+	else \
+		printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: repo-%s\n  namespace: argocd\n  labels:\n    argocd.argoproj.io/secret-type: repository\nstringData:\n  type: git\n  url: %s\n' "$$SAFE_NAME" "$(REPO)" > $$SECRET_FILE; \
+	fi; \
+	echo "Credentials saved to $$SECRET_FILE"
 
 argocd-list-repos: check-kubectl
 	@TOKEN=$$(curl -sf http://argocd.localhost/api/v1/session \
@@ -290,6 +357,33 @@ argocd-list-apps: check-kubectl
 		python3 -c "import sys,json; apps=json.load(sys.stdin).get('items') or []; [print('No applications found.') if not apps else (print(f\"  {'NAME':<25} {'SYNC':<12} HEALTH\"), print(f\"  {'-'*25} {'-'*12} {'-'*10}\"), [print(f\"  {a.get('metadata',{}).get('name','?'):<25} {a.get('status',{}).get('sync',{}).get('status','?'):<12} {a.get('status',{}).get('health',{}).get('status','?')}\") for a in apps])]"
 
 ## Sealed Secrets
+
+seal: check-kubeseal
+	@if [ -z "$(NAME)" ]; then \
+		echo "Usage: make seal NAME=<name> [NAMESPACE=<ns>]"; exit 1; \
+	fi
+	@if [ ! -f local/secrets/$(NAME).env ]; then \
+		echo "Error: local/secrets/$(NAME).env not found"; exit 1; \
+	fi
+	@if [ ! -f local/sealed-secrets-cert.pem ]; then \
+		echo "Error: local/sealed-secrets-cert.pem not found — run: make kubeseal-cert"; exit 1; \
+	fi
+	@mkdir -p apps
+	@NS="$(if $(NAMESPACE),$(NAMESPACE),default)"; \
+	kubectl create secret generic $(NAME) \
+		--namespace=$$NS \
+		--from-env-file=local/secrets/$(NAME).env \
+		--dry-run=client -o yaml | \
+	kubeseal --cert local/sealed-secrets-cert.pem --format yaml \
+		> apps/$(NAME)-sealed-secret.yaml; \
+	echo "Sealed: apps/$(NAME)-sealed-secret.yaml (namespace: $$NS)"
+
+sealed-secrets-backup: check-kubectl
+	@until kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active --no-headers 2>/dev/null | grep -q .; do sleep 2; done
+	@kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active -o json | \
+		python3 -c "import sys,json; obj=json.load(sys.stdin); strip=['resourceVersion','uid','creationTimestamp','managedFields','selfLink','generation','annotations']; [[m.pop(f,None) for f in strip] for item in obj.get('items',[]) for m in [item.get('metadata',{})]]; print(json.dumps(obj,indent=2))" \
+		> local/sealed-secrets-key.json
+	@echo "Key backed up to local/sealed-secrets-key.json"
 
 kubeseal-cert: check-kubectl
 	@which kubeseal > /dev/null 2>&1 || (echo "Error: kubeseal not found. Run: brew install kubeseal"; exit 1)

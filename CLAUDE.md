@@ -18,7 +18,9 @@ make argocd-add-repo REPO=<url> [TOKEN=<tok>]
 make argocd-add-source REPO=<url> [SOURCE_PATH=.] [REVISION=HEAD]
 make argocd-list-repos
 make argocd-list-apps
-make kubeseal-cert           # fetch controller public cert → local/sealed-secrets-cert.pem
+make seal NAME=<name> [NAMESPACE=<ns>]   # seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml
+make sealed-secrets-backup              # back up controller keypair → local/sealed-secrets-key.json
+make kubeseal-cert                      # fetch controller public cert → local/sealed-secrets-cert.pem
 make ca-generate             # generate CA keypair → local/ca.crt + local/ca.key
 make ca-trust                # trust local CA in macOS Keychain (sudo)
 ```
@@ -26,26 +28,30 @@ make ca-trust                # trust local CA in macOS Keychain (sudo)
 ## Bootstrap sequence (what `make create` does)
 
 1. Auto-generate CA if `local/ca.crt` missing (`make ca-generate`)
-2. Auto-create `./data/` directory
-3. `k3d cluster create` — mounts Traefik HelmChartConfig + `./data:/mnt/data` into all nodes
+2. Auto-create `./local/data/volumes/` directory
+3. `k3d cluster create` — mounts Traefik HelmChartConfig + `./local/data:/mnt/data` into all nodes
 4. Wait for `helm-install-traefik` job + traefik rollout
-5. Patch `local-path-config` ConfigMap → storage root becomes `/mnt/data`; restart provisioner
-6. Apply Sealed Secrets + cert-manager **in parallel** (background jobs); wait for both
-7. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
-8. `kubectl apply bootstrap/cert-manager-issuers.yaml` — creates `localhost-ca` ClusterIssuer
-9. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD
-10. Patch `argocd-cmd-params-cm` with `server.insecure: true` (before pod schedules — no restart needed)
-11. Wait for argocd-server rollout
-12. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `https://argocd.localhost` with TLS
-13. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
+5. Patch `local-path-config` ConfigMap → storage root becomes `/mnt/data/volumes`; restart provisioner
+6. Restore Sealed Secrets keypair from `local/sealed-secrets-key.json` if present
+7. Apply Sealed Secrets + cert-manager **in parallel** (background jobs); wait for both + webhook ready
+8. Back up Sealed Secrets keypair → `local/sealed-secrets-key.json`; fetch cert → `local/sealed-secrets-cert.pem`
+9. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
+10. `kubectl apply bootstrap/cert-manager-issuers.yaml` — creates `localhost-ca` ClusterIssuer
+11. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD; patch `server.insecure: true`
+12. Wait for argocd-server rollout
+13. Restore ArgoCD repo credentials from `local/argocd-repos/` if present
+14. Restore ArgoCD ConfigMap patches from `local/argocd-config/` if present
+15. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `https://argocd.localhost` with TLS
+16. Set admin password from `ARGOCD_DESIRED_PASSWORD` in `local/.env` if set
+17. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
 
-After step 13, ArgoCD owns everything. It watches `apps/` and creates child Applications from any `.yaml` committed there.
+After step 17, ArgoCD owns everything. It watches `apps/` and creates child Applications from any `.yaml` committed there.
 
 ## Architecture
 
 ```
 bootstrap/                    Makefile applies all of these directly (one-time)
-  local-path-config.yaml      Reconfigures local-path-provisioner to use /mnt/data
+  local-path-config.yaml      Reconfigures local-path-provisioner to use /mnt/data/volumes
   sealed-secrets.yaml         Sealed Secrets controller manifest
   cert-manager.yaml           cert-manager manifest
   cert-manager-issuers.yaml   localhost-ca ClusterIssuer
@@ -64,9 +70,16 @@ cluster/
 
 k3d-config.yaml               Cluster definition (ports, image, node count)
 
-local/                        Gitignored user overrides (see local/README.md)
-  .env                        Makefile variable overrides (WORKERS, K3S_VERSION, etc.)
+local/                        Gitignored runtime state (see local/README.md)
+  .env                        Makefile variable overrides + ARGOCD_DESIRED_PASSWORD
   k3d-config.yaml             Merged on top of repo k3d-config.yaml at cluster create
+  ca.crt + ca.key             TLS CA keypair (auto-generated; trust once with make ca-trust)
+  sealed-secrets-key.json     Controller keypair backup (auto-saved; losing it = all SealedSecrets unreadable)
+  sealed-secrets-cert.pem     Controller public cert for sealing (auto-saved on create)
+  data/volumes/               Persistent volume data (bind-mounted as /mnt/data into nodes)
+  secrets/                    Plain KEY=VALUE files → sealed via make seal
+  argocd-repos/               Repo credential Secrets → auto-saved by argocd-add-repo; restored on bootstrap
+  argocd-config/              ArgoCD ConfigMap patches → restored on bootstrap
 ```
 
 ## Adding an app repo
@@ -82,10 +95,13 @@ Then create an Application manifest in your app repo pointing ArgoCD at it.
 - Traefik dashboard URL requires trailing slash: `http://traefik.localhost/dashboard/`
 - Do NOT install local-path-provisioner — K3S includes it
 - If ports unreachable: `docker ps --filter name=k3d-homelab-serverlb`
-- `make argocd-password` reads the initial secret — stale if password was changed via `argocd-set-password`; pass `ARGOCD_PASSWORD=<pw>` to override
+- `make argocd-password` reads `argocd-initial-admin-secret` — kept in sync by `argocd-set-password`; pass `ARGOCD_PASSWORD=<pw>` to override
+- `make argocd-set-password` auto-saves the new password to `local/.env` as `ARGOCD_DESIRED_PASSWORD`
+- `make argocd-add-repo` auto-saves credentials to `local/argocd-repos/` — re-applied on next bootstrap
 - `make scale` only scales up; to scale down use `make recreate WORKERS=N`
 - `k3d node create` appends `-0` to node names (k3d behavior, cosmetic only)
 - CA is auto-generated on first `make create` — run `make ca-trust` once to avoid browser warnings
-- `local/ca.crt` + `local/ca.key` are gitignored and persist across `make recreate` — same CA, no re-trust needed
+- `local/ca.crt` + `local/ca.key` persist across `make recreate` — same CA, no re-trust needed
+- `local/sealed-secrets-key.json` is like `local/ca.key` — losing it makes all SealedSecrets permanently unreadable
 - cert-manager webhook has a known K3S timing issue — bootstrap waits explicitly for webhook pod ready
-- `data/` directories (one per PV) are NOT cleaned up when a PVC is deleted — manage `./data/` manually
+- `volumes/` directories (one per PV) are NOT cleaned up when a PVC is deleted — manage `./local/data/volumes/` manually
