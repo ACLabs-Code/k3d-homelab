@@ -236,6 +236,9 @@ info:
 	@echo "  Username : admin"
 	@printf "  Password : "; kubectl get secret argocd-initial-admin-secret -n argocd \
 		-o jsonpath="{.data.password}" 2>/dev/null | base64 -d; echo ""
+	@echo ""
+	@echo "=== Headlamp Token ==="
+	@kubectl create token headlamp -n headlamp --duration=8760h 2>/dev/null || echo "  (headlamp not yet deployed)"
 
 ## TLS
 
