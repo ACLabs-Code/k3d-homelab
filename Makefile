@@ -108,36 +108,16 @@ create: check-docker check-kubectl check-k3d
 		echo "Restoring Sealed Secrets key..."; \
 		kubectl apply -f local/sealed-secrets-key.json; \
 	fi
-	@echo "Installing Sealed Secrets and cert-manager in parallel..."
-	kubectl apply -f bootstrap/sealed-secrets.yaml & \
-	kubectl apply -f bootstrap/cert-manager.yaml & \
-	wait
-	@echo "Waiting for Sealed Secrets and cert-manager..."
-	kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=120s & \
-	kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s & \
-	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s & \
-	wait
+	@echo "Installing cert-manager..."
+	kubectl apply -f bootstrap/cert-manager.yaml
+	@echo "Waiting for cert-manager..."
+	kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
+	kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=120s
-	@echo "Backing up Sealed Secrets key..."
-	@until kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active --no-headers 2>/dev/null | grep -q .; do sleep 2; done
-	@kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active -o json | \
-		python3 -c "import sys,json; obj=json.load(sys.stdin); strip=['resourceVersion','uid','creationTimestamp','managedFields','selfLink','generation','annotations']; [[m.pop(f,None) for f in strip] for item in obj.get('items',[]) for m in [item.get('metadata',{})]]; print(json.dumps(obj,indent=2))" \
-		> local/sealed-secrets-key.json
-	@echo "Key backed up to local/sealed-secrets-key.json"
-	@if which kubeseal > /dev/null 2>&1; then \
-		kubeseal --fetch-cert \
-			--controller-name=sealed-secrets-controller \
-			--controller-namespace=kube-system \
-			> local/sealed-secrets-cert.pem; \
-		echo "Cert saved to local/sealed-secrets-cert.pem"; \
-	else \
-		echo "kubeseal not installed — skipping cert fetch (run: brew install kubeseal && make kubeseal-cert)"; \
-	fi
-	@echo "Loading CA and creating ClusterIssuer..."
+	@echo "Loading CA..."
 	kubectl create secret tls localhost-ca-secret \
 		--cert=local/ca.crt --key=local/ca.key \
 		-n cert-manager --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f bootstrap/cert-manager-issuers.yaml
 	@echo "Installing ArgoCD..."
 	kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply --server-side -n argocd -f bootstrap/argocd-install.yaml
@@ -151,8 +131,10 @@ create: check-docker check-kubectl check-k3d
 		echo "Restoring ArgoCD configuration..."; \
 		kubectl apply -f local/argocd-config/; \
 	fi
-	kubectl apply -f bootstrap/argocd-ingress.yaml
 	@if [ -n "$(ARGOCD_DESIRED_PASSWORD)" ]; then \
+		echo "Waiting for ArgoCD ingress..."; \
+		until kubectl get ingress argocd-server-ingress -n argocd >/dev/null 2>&1; do sleep 5; done; \
+		sleep 3; \
 		echo "Setting ArgoCD admin password..."; \
 		INITIAL_PW=$$(kubectl get secret argocd-initial-admin-secret -n argocd \
 			-o jsonpath="{.data.password}" | base64 -d); \
@@ -174,6 +156,24 @@ create: check-docker check-kubectl check-k3d
 	fi
 	@echo "Applying root Application..."
 	sed 's|REPO_URL_PLACEHOLDER|$(REPO_URL)|g' bootstrap/argocd-root-app.yaml | kubectl apply -f -
+	@echo "Waiting for Sealed Secrets controller (ArgoCD will install it)..."
+	@until kubectl get deployment sealed-secrets-controller -n kube-system >/dev/null 2>&1; do sleep 5; done
+	@kubectl rollout status deployment/sealed-secrets-controller -n kube-system --timeout=180s
+	@echo "Backing up Sealed Secrets key..."
+	@until kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active --no-headers 2>/dev/null | grep -q .; do sleep 2; done
+	@kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key=active -o json | \
+		python3 -c "import sys,json; obj=json.load(sys.stdin); strip=['resourceVersion','uid','creationTimestamp','managedFields','selfLink','generation','annotations']; [[m.pop(f,None) for f in strip] for item in obj.get('items',[]) for m in [item.get('metadata',{})]]; print(json.dumps(obj,indent=2))" \
+		> local/sealed-secrets-key.json
+	@echo "Key backed up to local/sealed-secrets-key.json"
+	@if which kubeseal > /dev/null 2>&1; then \
+		kubeseal --fetch-cert \
+			--controller-name=sealed-secrets-controller \
+			--controller-namespace=kube-system \
+			> local/sealed-secrets-cert.pem; \
+		echo "Cert saved to local/sealed-secrets-cert.pem"; \
+	else \
+		echo "kubeseal not installed — skipping cert fetch (run: brew install kubeseal && make kubeseal-cert)"; \
+	fi
 	@echo ""
 	$(MAKE) info
 

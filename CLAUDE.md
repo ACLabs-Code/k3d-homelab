@@ -34,19 +34,17 @@ make ca-trust                # trust local CA in macOS Keychain (sudo)
 4. Wait for `helm-install-traefik` job + traefik rollout
 5. Patch `local-path-config` ConfigMap → storage root becomes `/mnt/data/volumes`; restart provisioner
 6. Restore Sealed Secrets keypair from `local/sealed-secrets-key.json` if present
-7. Apply Sealed Secrets + cert-manager **in parallel** (background jobs); wait for both + webhook ready
-8. Back up Sealed Secrets keypair → `local/sealed-secrets-key.json`; fetch cert → `local/sealed-secrets-cert.pem`
-9. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
-10. `kubectl apply bootstrap/cert-manager-issuers.yaml` — creates `localhost-ca` ClusterIssuer
-11. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD; patch `server.insecure: true`
-12. Wait for argocd-server rollout
-13. Restore ArgoCD repo credentials from `local/argocd-repos/` if present
-14. Restore ArgoCD ConfigMap patches from `local/argocd-config/` if present
-15. `kubectl apply bootstrap/argocd-ingress.yaml` — exposes ArgoCD at `https://argocd.localhost` with TLS
-16. Set admin password from `ARGOCD_DESIRED_PASSWORD` in `local/.env` if set
-17. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
+7. Apply cert-manager; wait for rollout + webhook ready
+8. Load `local/ca.crt` + `local/ca.key` as Secret `localhost-ca-secret` in cert-manager namespace
+9. `kubectl apply bootstrap/argocd-install.yaml` — installs ArgoCD; patch `server.insecure: true`
+10. Wait for argocd-server rollout
+11. Restore ArgoCD repo credentials from `local/argocd-repos/` if present
+12. Restore ArgoCD ConfigMap patches from `local/argocd-config/` if present
+13. Wait for ArgoCD ingress (if `ARGOCD_DESIRED_PASSWORD` set); set admin password
+14. `kubectl apply bootstrap/argocd-root-app.yaml` — hands off to ArgoCD
+15. Wait for Sealed Secrets controller (ArgoCD installs it); back up keypair + fetch cert
 
-After step 17, ArgoCD owns everything. It watches `apps/` and creates child Applications from any `.yaml` committed there.
+After step 14, ArgoCD owns everything. It syncs `apps/` and installs: sealed-secrets controller, cert-manager ClusterIssuer, ArgoCD ingress, Headlamp, and any future apps.
 
 ## Architecture
 
@@ -56,14 +54,17 @@ bootstrap/                    Makefile applies all of these directly (one-time)
   cert-manager-issuers.yaml   localhost-ca ClusterIssuer
   argocd-ingress.yaml         argocd.localhost ingress (TLS via localhost-ca)
   argocd-root-app.yaml        Root Application → watches apps/ in this repo
-  sealed-secrets.yaml         Sealed Secrets controller manifest (regenerate: make update-manifests)
-  cert-manager.yaml           cert-manager manifest (regenerate: make update-manifests)
-  argocd-install.yaml         Official ArgoCD manifest (regenerate: make update-manifests)
+  sealed-secrets.yaml         Sealed Secrets controller manifest (ArgoCD-managed; regenerate: make update-manifests)
+  cert-manager.yaml           cert-manager manifest (bootstrap-applied; regenerate: make update-manifests)
+  argocd-install.yaml         Official ArgoCD manifest (bootstrap-applied; regenerate: make update-manifests)
 
 docs/
   tls-acme.md                 Let's Encrypt DNS-01 setup (Cloudflare, Route53, generic)
 
 apps/                         ArgoCD watches this dir; commit .yaml here to register apps
+  sealed-secrets.yaml         Sealed Secrets controller (ArgoCD-managed, sources bootstrap/sealed-secrets.yaml)
+  cert-manager-issuers.yaml   localhost-ca ClusterIssuer (ArgoCD-managed, sources bootstrap/cert-manager-issuers.yaml)
+  argocd-ingress.yaml         ArgoCD ingress (ArgoCD self-managed, sources bootstrap/argocd-ingress.yaml)
   headlamp.yaml               Headlamp dashboard (https://headlamp.localhost)
 
 cluster/
