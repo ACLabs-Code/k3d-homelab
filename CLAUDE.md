@@ -11,7 +11,7 @@ make recreate            # delete + create
 make scale WORKERS=N     # add agents to running cluster (scale up only)
 make add-worker          # add one agent to running cluster
 make status              # nodes, pods, ArgoCD app status
-make info                # access URLs + ArgoCD credentials
+make info                # access URLs, ArgoCD credentials, Headlamp token
 make argocd-password     # print ArgoCD credentials
 make argocd-set-password NEW_PASSWORD=<pw>
 make argocd-add-repo REPO=<url> [TOKEN=<tok>]
@@ -19,6 +19,7 @@ make argocd-add-source REPO=<url> [SOURCE_PATH=.] [REVISION=HEAD]
 make argocd-list-repos
 make argocd-list-apps
 make update-manifests        # update k3d-config.yaml + re-fetch bootstrap manifests at current version pins
+make headlamp-token          # print a Headlamp login token (also shown by make info)
 make seal NAME=<name> [NAMESPACE=<ns>]   # seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml
 make sealed-secrets-backup              # back up controller keypair → local/sealed-secrets-key.json
 make kubeseal-cert                      # fetch controller public cert → local/sealed-secrets-cert.pem
@@ -51,9 +52,9 @@ After step 14, ArgoCD owns everything. It syncs `apps/` and installs: sealed-sec
 ```
 bootstrap/                    Makefile applies all of these directly (one-time)
   local-path-config.yaml      Reconfigures local-path-provisioner to use /mnt/data/volumes
-  cert-manager-issuers.yaml   localhost-ca ClusterIssuer
-  argocd-ingress.yaml         argocd.localhost ingress (TLS via localhost-ca)
   argocd-root-app.yaml        Root Application → watches apps/ in this repo
+  cert-manager-issuers.yaml   localhost-ca ClusterIssuer (ArgoCD-managed via apps/cert-manager-issuers.yaml)
+  argocd-ingress.yaml         argocd.localhost ingress (ArgoCD self-managed via apps/argocd-ingress.yaml)
   sealed-secrets.yaml         Sealed Secrets controller manifest (ArgoCD-managed; regenerate: make update-manifests)
   cert-manager.yaml           cert-manager manifest (bootstrap-applied; regenerate: make update-manifests)
   argocd-install.yaml         Official ArgoCD manifest (bootstrap-applied; regenerate: make update-manifests)
@@ -108,3 +109,4 @@ Then create an Application manifest in your app repo pointing ArgoCD at it.
 - `local/sealed-secrets-key.json` is like `local/ca.key` — losing it makes all SealedSecrets permanently unreadable
 - cert-manager webhook has a known K3S timing issue — bootstrap waits explicitly for webhook pod ready
 - `volumes/` directories (one per PV) are NOT cleaned up when a PVC is deleted — manage `./local/data/volumes/` manually
+- Headlamp token is printed at end of `make create` and `make info` — invalidated on every `make recreate` (cluster signing key changes)
