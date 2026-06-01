@@ -3,8 +3,8 @@ kind: Simple
 metadata:
   name: homelab
 servers: 1
-agents: 0
 image: rancher/k3s:v1.36.1-k3s1
+agents: 0
 ports:
   - port: 80:80
     nodeFilters: [loadbalancer]

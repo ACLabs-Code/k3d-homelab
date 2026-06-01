@@ -11,9 +11,11 @@ Override Makefile variables:
 ```bash
 # local/.env
 WORKERS=2
-K3S_VERSION=v1.32.0-k3s1
-ARGOCD_VERSION=v2.13.0
 MAX_WORKERS=10
+K3S_VERSION=v1.36.1-k3s1          # bump here, then run: make update-manifests
+ARGOCD_VERSION=v3.4.3              # bump here, then run: make update-manifests
+SEALED_SECRETS_VERSION=v0.37.0    # bump here, then run: make update-manifests
+CERT_MANAGER_VERSION=v1.20.2      # bump here, then run: make update-manifests
 ARGOCD_DESIRED_PASSWORD=yourpassword   # auto-written by make argocd-set-password
 ```
 

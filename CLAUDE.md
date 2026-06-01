@@ -18,6 +18,7 @@ make argocd-add-repo REPO=<url> [TOKEN=<tok>]
 make argocd-add-source REPO=<url> [SOURCE_PATH=.] [REVISION=HEAD]
 make argocd-list-repos
 make argocd-list-apps
+make update-manifests        # update k3d-config.yaml + re-fetch bootstrap manifests at current version pins
 make seal NAME=<name> [NAMESPACE=<ns>]   # seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml
 make sealed-secrets-backup              # back up controller keypair → local/sealed-secrets-key.json
 make kubeseal-cert                      # fetch controller public cert → local/sealed-secrets-cert.pem
@@ -52,12 +53,12 @@ After step 17, ArgoCD owns everything. It watches `apps/` and creates child Appl
 ```
 bootstrap/                    Makefile applies all of these directly (one-time)
   local-path-config.yaml      Reconfigures local-path-provisioner to use /mnt/data/volumes
-  sealed-secrets.yaml         Sealed Secrets controller manifest
-  cert-manager.yaml           cert-manager manifest
   cert-manager-issuers.yaml   localhost-ca ClusterIssuer
-  argocd-install.yaml         Official ArgoCD manifest
   argocd-ingress.yaml         argocd.localhost ingress (TLS via localhost-ca)
   argocd-root-app.yaml        Root Application → watches apps/ in this repo
+  sealed-secrets.yaml         Sealed Secrets controller manifest (regenerate: make update-manifests)
+  cert-manager.yaml           cert-manager manifest (regenerate: make update-manifests)
+  argocd-install.yaml         Official ArgoCD manifest (regenerate: make update-manifests)
 
 docs/
   tls-acme.md                 Let's Encrypt DNS-01 setup (Cloudflare, Route53, generic)
@@ -68,7 +69,7 @@ cluster/
   traefik/
     helmchartconfig.yaml      Traefik dashboard config (mounted via --volume at create)
 
-k3d-config.yaml               Cluster definition (ports, image, node count)
+k3d-config.yaml               Cluster definition (ports, node count, K3S image; regenerate: make update-manifests)
 
 local/                        Gitignored runtime state (see local/README.md)
   .env                        Makefile variable overrides + ARGOCD_DESIRED_PASSWORD

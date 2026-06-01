@@ -1,8 +1,8 @@
 CLUSTER_NAME           := homelab
-ARGOCD_VERSION         := v2.12.7
-SEALED_SECRETS_VERSION := v0.37.0
-CERT_MANAGER_VERSION   := v1.20.2
-K3S_VERSION            := v1.31.4-k3s1
+ARGOCD_VERSION         ?= v3.4.3
+SEALED_SECRETS_VERSION ?= v0.37.0
+CERT_MANAGER_VERSION   ?= v1.20.2
+K3S_VERSION            ?= v1.36.1-k3s1
 WORKERS                ?= 0
 MAX_WORKERS            := 5
 REPO_URL               := $(shell git remote get-url origin 2>/dev/null | sed 's|git@github.com:|https://github.com/|; s|\.git$$||')
@@ -19,6 +19,7 @@ K3D_CONFIG_FLAGS := --config k3d-config.yaml $(if $(K3D_LOCAL_CONFIG),--config $
 
 .PHONY: help check-tools create delete recreate scale add-worker status info \
         argocd-password argocd-set-password argocd-add-repo argocd-list-repos argocd-list-apps \
+        update-manifests \
         seal sealed-secrets-backup kubeseal-cert ca-generate ca-trust \
         check-docker check-kubectl check-k3d check-kubeseal
 
@@ -55,6 +56,9 @@ help:
 	@echo "  seal NAME=<name> [NAMESPACE=<ns>]  Seal local/secrets/<name>.env → apps/<name>-sealed-secret.yaml"
 	@echo "  sealed-secrets-backup              Back up controller keypair → local/sealed-secrets-key.json"
 	@echo "  kubeseal-cert                      Fetch controller public cert → local/sealed-secrets-cert.pem"
+	@echo ""
+	@echo "Manifests"
+	@echo "  update-manifests     Re-fetch bootstrap manifests from GitHub at current version pins"
 	@echo ""
 	@echo "Toolchain"
 	@echo "  check-tools          Verify all required tools are installed"
@@ -355,6 +359,22 @@ argocd-list-apps: check-kubectl
 	curl -sf http://argocd.localhost/api/v1/applications \
 		-H "Authorization: Bearer $$TOKEN" | \
 		python3 -c "import sys,json; apps=json.load(sys.stdin).get('items') or []; [print('No applications found.') if not apps else (print(f\"  {'NAME':<25} {'SYNC':<12} HEALTH\"), print(f\"  {'-'*25} {'-'*12} {'-'*10}\"), [print(f\"  {a.get('metadata',{}).get('name','?'):<25} {a.get('status',{}).get('sync',{}).get('status','?'):<12} {a.get('status',{}).get('health',{}).get('status','?')}\") for a in apps])]"
+
+## Manifest management
+
+update-manifests:
+	@echo "Updating k3d-config.yaml K3S image to $(K3S_VERSION)..."
+	sed -i '' 's|image: rancher/k3s:.*|image: rancher/k3s:$(K3S_VERSION)|' k3d-config.yaml
+	@echo "Fetching sealed-secrets $(SEALED_SECRETS_VERSION)..."
+	curl -sL https://github.com/bitnami-labs/sealed-secrets/releases/download/$(SEALED_SECRETS_VERSION)/controller.yaml \
+		> bootstrap/sealed-secrets.yaml
+	@echo "Fetching cert-manager $(CERT_MANAGER_VERSION)..."
+	curl -sL https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml \
+		> bootstrap/cert-manager.yaml
+	@echo "Fetching ArgoCD $(ARGOCD_VERSION)..."
+	curl -sL https://raw.githubusercontent.com/argoproj/argo-cd/$(ARGOCD_VERSION)/manifests/install.yaml \
+		> bootstrap/argocd-install.yaml
+	@echo "Done. Review changes and commit."
 
 ## Sealed Secrets
 
