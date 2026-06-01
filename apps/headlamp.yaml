@@ -23,7 +23,7 @@ spec:
             - host: headlamp.localhost
               paths:
                 - path: /
-                  pathType: Prefix
+                  type: Prefix
           tls:
             - secretName: headlamp-tls
               hosts:
